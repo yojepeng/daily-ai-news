@@ -39,10 +39,10 @@ jobs:
           SERVERCHAN_SENDKEY: ${{ secrets.SERVERCHAN_SENDKEY }}
           HOURS_BACK: '48'
           HISTORY_DAYS: '7'
-          ENABLE_TTS: 'true'
+          ENABLE_TTS: 'false'
         run: python push_news.py
 
-      - name: Commit sent history & audio
+      - name: Commit sent history
         if: always()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -50,6 +50,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
-          git add history.json audio/ || true
-          git commit -m "chore: update sent history & audio [skip ci]" || echo "no changes"
+          git add history.json || true
+          git commit -m "chore: update sent history [skip ci]" || echo "no changes"
           git push

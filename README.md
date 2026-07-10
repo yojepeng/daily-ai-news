@@ -81,28 +81,16 @@ daily-ai-news/
 
 ---
 
-### （可选）开启语音播报
+### 语音播报（当前已关闭）
 
-语音播报默认已开启（`ENABLE_TTS=true`）。文字推送**不需要**这一步；但要让「🎧 语音播报」链接能点开收听，需要一次性开启 **GitHub Pages**（把 `audio/` 下的 mp3 发布成公开链接）。
+语音播报功能（edge-tts 合成 mp3 + 托管）**当前默认关闭**（`ENABLE_TTS=false`），文字推送完全不受影响。
 
-> ⚠️ **关于收费（重要）**：GitHub Pages 对**公开仓库免费**；对**私有仓库**在免费计划下需要升级到付费计划（GitHub Pro，约 $4/月）才能用。
-> - **推荐做法（免费）**：把本仓库设为**公开**（`Settings → General → 危险区域 → Change repository visibility → Make public`）。脚本里**不含任何密钥**（Key 都在 GitHub Secrets），公开安全无风险，语音即可免费使用。
-> - 若坚持私有又要语音，则需升级 GitHub 付费计划；否则请关闭语音（见下方说明）。
+若未来想重新开启，需要：
+1. 准备一个**可用的音频托管服务**（如腾讯云 COS / 阿里云 OSS / Cloudflare R2 等，需确保域名在微信内可访问）
+2. 修改 `push_news.py` 的 `upload_to_storage` 函数适配对应存储
+3. 工作流 `ENABLE_TTS` 改为 `'true'`，并添加对应的存储密钥到 GitHub Secrets
 
-**开启步骤（仓库已设为公开后）：**
-
-> 本项目采用 **GitHub Actions 自动部署**方式发布语音（比"从分支部署"更稳、无时序问题）。因此在 Pages 设置里**无需、也无法**手动选 `Deploy from a branch`——那个选项灰度不可点是正常现象，保持默认的 `GitHub Actions` 即可，部署由工作流自动完成。
-
-1. 仓库页面 → `Settings` → 左侧 `Pages`，确认 `Source` 为 **`GitHub Actions`**（默认即是，不要改）
-2. 直接去 `操作(Actions)` → `Daily Tech News` → `运行工作流` 跑一次
-3. 工作流成功后会**自动部署** Pages，地址形如 `https://你的用户名.github.io/daily-ai-news/`
-4. 之后每次推送里出现的 `audio/2026-xx-xx.mp3` 链接即可直接打开收听（首次运行因站点刚建，当天链接可能稍慢，次日稳定）
-
-> 说明：
-> - 脚本会自动用 `GITHUB_REPOSITORY` 推导出 Pages 链接，无需你手动配置。
-> - 旧音频会按 `HISTORY_DAYS`（7 天）自动清理，仓库不会无限膨胀。
-> - 若不想用语音播报，把工作流里 `ENABLE_TTS` 改为 `false` 即可，仅推文字（连 Pages 都不需要）。
-> - 想换音色：设置环境变量 `TTS_VOICE`（如 `zh-CN-YunxiNeural` 男声、`zh-CN-XiaoyiNeural` 女声）。
+> ⚠️ **历史经验**：GitHub Pages（`github.io` 域名）会被微信拦截，不适合作为微信推送的音频托管方案。
 
 ---
 
