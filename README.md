@@ -83,7 +83,13 @@ daily-ai-news/
 
 ### （可选）开启语音播报
 
-语音播报默认已开启（`ENABLE_TTS=true`）。文字推送**不需要**这一步；但要让「🎧 语音播报」链接能点开收听，需要一次性开启 **GitHub Pages**（把 `audio/` 下的 mp3 发布成公开链接）。即使仓库是私有的，Pages 站点也会是公开可访问的。
+语音播报默认已开启（`ENABLE_TTS=true`）。文字推送**不需要**这一步；但要让「🎧 语音播报」链接能点开收听，需要一次性开启 **GitHub Pages**（把 `audio/` 下的 mp3 发布成公开链接）。
+
+> ⚠️ **关于收费（重要）**：GitHub Pages 对**公开仓库免费**；对**私有仓库**在免费计划下需要升级到付费计划（GitHub Pro，约 $4/月）才能用。
+> - **推荐做法（免费）**：把本仓库设为**公开**（`Settings → General → 危险区域 → Change repository visibility → Make public`）。脚本里**不含任何密钥**（Key 都在 GitHub Secrets），公开安全无风险，语音即可免费使用。
+> - 若坚持私有又要语音，则需升级 GitHub 付费计划；否则请关闭语音（见下方说明）。
+
+**开启步骤（仓库已设为公开后）：**
 
 1. 仓库页面 → `Settings` → 左侧 `Pages`
 2. `Build and deployment` → `Source` 选 **`Deploy from a branch`**
@@ -94,7 +100,7 @@ daily-ai-news/
 > 说明：
 > - 脚本会自动用 `GITHUB_REPOSITORY` 推导出 Pages 链接，无需你手动配置。
 > - 旧音频会按 `HISTORY_DAYS`（7 天）自动清理，仓库不会无限膨胀。
-> - 若不想用语音播报，把工作流里 `ENABLE_TTS` 改为 `false` 即可，仅推文字。
+> - 若不想用语音播报，把工作流里 `ENABLE_TTS` 改为 `false` 即可，仅推文字（连 Pages 都不需要）。
 > - 想换音色：设置环境变量 `TTS_VOICE`（如 `zh-CN-YunxiNeural` 男声、`zh-CN-XiaoyiNeural` 女声）。
 
 ---
