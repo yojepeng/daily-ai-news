@@ -2,24 +2,24 @@
 # -*- coding: utf-8 -*-
 """
 每日科技 推送
-流程: 分 4 个板块抓取 RSS -> 各板块用 DeepSeek 总结成详细报道 -> Server酱 推送到微信
+流程: 分板块抓取 RSS -> 各板块用 DeepSeek 总结成详细报道 -> Server酱 推送到微信
 
-板块:
-  一、科技新闻  二、Vibe Coding  三、AI 应用  四、AI 动向  (每个板块各 8 条)
+板块 (共 3 个):
+  一、科技新闻        (8 条)
+  二、Vibe Coding     (8 条)
+  三、AI 应用与动向   (10 条, 由原"AI 应用"与"AI 动向"合并)
 
-依赖环境变量 (在 GitHub Secrets 中配置):
-  DEEPSEEK_API_KEY   : DeepSeek 平台的 API Key
-  SERVERCHAN_SENDKEY : Server酱 Turbo 的 SendKey
-
-可选环境变量:
-  ITEMS_PER_TOPIC : 每个板块的新闻条数上限, 默认 8
-  HOURS_BACK      : 只保留最近多少小时内的新闻, 默认 48
+去重策略:
+  - 板块间 / 数据源间: 全局标题归一化去重, 同一新闻不会出现在两个板块。
+  - 跨天历史: 已推送过的标题记入 history.json, 之后 N 天内不再重复推送。
 """
 
 import os
+import re
 import sys
 import time
 import html
+import json
 import datetime as dt
 import urllib.parse
 from email.utils import parsedate_to_datetime
@@ -28,7 +28,7 @@ import requests
 import feedparser
 
 # ----------------------------------------------------------------------------
-# 配置区: 4 个板块, 各用 Google News 搜索 RSS (中/英) 聚合
+# 配置区: 板块与对应的 RSS 源
 # 说明: 脚本运行在 GitHub 的海外服务器上, 因此 Google News RSS 稳定可用。
 # ----------------------------------------------------------------------------
 def gn(query: str, hl: str, gl: str, ceid: str) -> str:
@@ -42,6 +42,7 @@ def gn(query: str, hl: str, gl: str, ceid: str) -> str:
 TOPICS = [
     {
         "section": "一、科技新闻",
+        "n": 8,
         "feeds": [
             gn("科技 OR 半导体 OR 芯片 OR 智能手机 OR 科技创新 when:2d", "zh-CN", "CN", "CN:zh"),
             gn("technology OR semiconductor OR smartphone OR chip when:2d", "en-US", "US", "US:en"),
@@ -51,29 +52,29 @@ TOPICS = [
     },
     {
         "section": "二、Vibe Coding",
+        "n": 8,
         "feeds": [
             gn("vibe coding OR AI coding OR Cursor IDE OR agentic coding when:2d", "en-US", "US", "US:en"),
             gn("Vibe Coding OR AI编程 OR Cursor OR 智能编程 when:2d", "zh-CN", "CN", "CN:zh"),
         ],
     },
     {
-        "section": "三、AI 应用",
+        "section": "三、AI 应用与动向",
+        "n": 10,
         "feeds": [
+            # 原 "AI 应用"
             gn("AI应用 OR AI代理 OR AI工具 OR 大模型应用 when:2d", "zh-CN", "CN", "CN:zh"),
             gn("AI application OR AI agent OR new AI tool when:2d", "en-US", "US", "US:en"),
-        ],
-    },
-    {
-        "section": "四、AI 动向",
-        "feeds": [
+            # 原 "AI 动向"
             gn("大模型 OR 人工智能 融资 OR 开源大模型 when:2d", "zh-CN", "CN", "CN:zh"),
             gn("OpenAI OR Anthropic OR Google AI OR LLM release when:2d", "en-US", "US", "US:en"),
         ],
     },
 ]
 
-ITEMS_PER_TOPIC = int(os.getenv("ITEMS_PER_TOPIC", "8"))
 HOURS_BACK = int(os.getenv("HOURS_BACK", "48"))
+HISTORY_DAYS = int(os.getenv("HISTORY_DAYS", "3"))
+HISTORY_FILE = os.getenv("HISTORY_FILE", "history.json")
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
 SERVERCHAN_SENDKEY = os.getenv("SERVERCHAN_SENDKEY", "").strip()
@@ -91,6 +92,42 @@ BEIJING = dt.timezone(dt.timedelta(hours=8))
 
 def log(msg: str) -> None:
     print(f"[{dt.datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+def normalize_key(s: str) -> str:
+    """把标题归一化成去重键: 转小写、去空白与标点、保留中英文字符、取前 40 字。"""
+    s = s.lower()
+    s = re.sub(r"\s+", "", s)
+    s = re.sub(r"[^\w\u4e00-\u9fff]", "", s)
+    return s[:40]
+
+
+def load_history():
+    """读取历史记录(已推送标题), 并裁剪掉超过 HISTORY_DAYS 天的旧条目。返回 (key集合, 完整列表)。"""
+    try:
+        with open(HISTORY_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return set(), []
+    now = time.time()
+    window = HISTORY_DAYS * 86400
+    fresh = [e for e in data if now - float(e.get("t", 0)) < window]
+    return set(e["k"] for e in fresh), fresh
+
+
+def save_history(keys_new):
+    """把本次推送的标题键追加进历史记录并写回文件。"""
+    _, hist = load_history()
+    now = time.time()
+    for k in keys_new:
+        hist.append({"k": k, "t": now})
+    window = HISTORY_DAYS * 86400
+    hist = [e for e in hist if now - float(e.get("t", 0)) < window]
+    try:
+        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(hist, f, ensure_ascii=False, indent=2)
+    except Exception as ex:
+        log(f"  历史记录写入失败(不影响推送): {ex}")
 
 
 def entry_time(entry) -> dt.datetime:
@@ -116,7 +153,7 @@ def entry_time(entry) -> dt.datetime:
 
 
 def fetch_topic(feeds):
-    """抓取一个板块的所有 RSS, 按时间过滤 + 去重, 返回该板块新闻列表(上限 ITEMS_PER_TOPIC)。"""
+    """抓取某板块的全部 RSS, 按时间过滤 + 源内去重, 返回(按时间倒序的)新闻列表。"""
     now = dt.datetime.now(dt.timezone.utc)
     cutoff = now - dt.timedelta(hours=HOURS_BACK)
     seen_titles = set()
@@ -145,11 +182,11 @@ def fetch_topic(feeds):
             log(f"    跳过 (抓取失败): {ex}")
 
     items.sort(key=lambda x: x["time"], reverse=True)
-    log(f"  该板块有效新闻 {len(items)} 条, 取前 {ITEMS_PER_TOPIC} 条")
-    return items[:ITEMS_PER_TOPIC]
+    log(f"  该板块候选新闻 {len(items)} 条")
+    return items
 
 
-def summarize_topic(section: str, items):
+def summarize_topic(section: str, n: int, items):
     """调用 DeepSeek 把某板块新闻整理成详细的 Markdown 报道。"""
     if not items:
         return f"_{section}：今日暂无足够的新内容。_"
@@ -165,7 +202,7 @@ def summarize_topic(section: str, items):
         "1. 用 Markdown 格式，每条独立成段并加粗标题；\n"
         "2. 每条用 2-4 句话具体说明：发生了什么、涉及哪些公司/人物/数据/产品、为什么重要；不要只复述标题；\n"
         "3. 保留原文链接，用 [原文](URL) 形式附在每条末尾；\n"
-        "4. 最多 8 条，按重要性排序；相似内容合并为一条；\n"
+        f"4. 最多 {n} 条，不足则按实际条数；按重要性排序；相似内容合并为一条；\n"
         "5. 剔除纯营销软文、无实质信息的水稿；\n"
         "6. 开头用一两句话概述该领域今日走势。\n\n"
         f"新闻列表：\n{news_text}"
@@ -214,26 +251,45 @@ def main():
     today = now_bj.strftime("%Y-%m-%d")
     log(f"开始生成「每日科技 {today}」...")
 
+    history_set, _ = load_history()
+    global_seen = set()
+    dispatched = []
     sections = []
     any_content = False
 
     for topic in TOPICS:
-        log(f"板块: {topic['section']}")
-        items = fetch_topic(topic["feeds"])
-        if items:
+        n = topic["n"]
+        log(f"板块: {topic['section']} (目标 {n} 条)")
+        raw = fetch_topic(topic["feeds"])
+
+        picked = []
+        for it in raw:
+            k = normalize_key(it["title"])
+            if k in global_seen or k in history_set:
+                continue
+            global_seen.add(k)
+            picked.append(it)
+            if len(picked) >= n:
+                break
+
+        if picked:
             any_content = True
+        dispatched.extend(normalize_key(it["title"]) for it in picked)
 
         if DEEPSEEK_API_KEY:
             try:
-                content = summarize_topic(topic["section"], items)
+                content = summarize_topic(topic["section"], n, picked)
             except Exception as ex:
                 log(f"  DeepSeek 调用失败, 使用原始列表兜底: {ex}")
-                content = build_fallback(topic["section"], items) if items else f"_{topic['section']}：今日暂无足够的新内容。_"
+                content = build_fallback(topic["section"], picked) if picked else f"_{topic['section']}：今日暂无足够的新内容。_"
         else:
             log("  未配置 DEEPSEEK_API_KEY, 使用原始列表。")
-            content = build_fallback(topic["section"], items) if items else f"_{topic['section']}：今日暂无足够的新内容。_"
+            content = build_fallback(topic["section"], picked) if picked else f"_{topic['section']}：今日暂无足够的新内容。_"
 
         sections.append(f"## {topic['section']}\n\n{content}")
+
+    # 无论推送是否成功, 都记录已处理的新闻, 避免跨天重复
+    save_history(dispatched)
 
     if not any_content:
         log("今日所有板块均未抓取到新闻, 结束。")
