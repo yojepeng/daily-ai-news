@@ -3,21 +3,30 @@
 """
 每日科技 推送
 流程: 分板块抓取 RSS -> 各板块用 DeepSeek 总结成详细报道 -> Server酱 推送到微信
+      (可选) 用 edge-tts 把新闻合成语音, 经 GitHub Pages 生成公开链接一并推送
 
-板块 (共 3 个):
-  一、科技新闻        (8 条)
-  二、Vibe Coding     (8 条)
-  三、AI 应用与动向   (10 条, 由原"AI 应用"与"AI 动向"合并)
+板块 (共 4 个, 共 28 条):
+  一、Vibe Coding      (6 条)
+  二、OPC 一人公司     (6 条, 政策/热点/新闻, 时间窗放宽到 7 天)
+  三、AI               (8 条, 应用+动向+模型发布)
+  四、科技新闻         (8 条)
 
 去重策略:
   - 板块间 / 数据源间: 全局标题归一化去重, 同一新闻不会出现在两个板块。
-  - 跨天历史: 已推送过的标题记入 history.json, 之后 N 天内不再重复推送。
+  - 跨天历史: 已推送过的标题记入 history.json, 之后 N 天内不再重复推送 (默认 7 天)。
+
+语音播报:
+  - ENABLE_TTS=true 时, 用 edge-tts 合成 mp3 存入 audio/<日期>.mp3。
+  - 通过 GitHub Pages 公开站点提供链接 (即使仓库私有也可访问)。
+  - PAGES_BASE 可手动指定; 否则由 GITHUB_REPOSITORY 自动推导。
+  - 生成失败不影响文字推送 (优雅降级)。
 """
 
 import os
 import re
 import sys
 import time
+import asyncio
 import html
 import json
 import datetime as dt
@@ -41,7 +50,37 @@ def gn(query: str, hl: str, gl: str, ceid: str) -> str:
 
 TOPICS = [
     {
-        "section": "一、科技新闻",
+        "section": "一、Vibe Coding",
+        "n": 6,
+        "feeds": [
+            gn("vibe coding OR AI coding OR Cursor IDE OR agentic coding when:2d", "en-US", "US", "US:en"),
+            gn("Vibe Coding OR AI编程 OR Cursor OR 智能编程 when:2d", "zh-CN", "CN", "CN:zh"),
+        ],
+    },
+    {
+        "section": "二、OPC 一人公司",
+        "n": 6,
+        "hours_back": 168,  # 一人公司类资讯频率低, 放宽到 7 天
+        "feeds": [
+            gn("一人公司 OR 独立开发者 OR 个体创业 OR 数字游民 OR solopreneur when:7d", "zh-CN", "CN", "CN:zh"),
+            gn("indie hacker OR solo founder OR bootstrapped startup OR one person company when:7d", "en-US", "US", "US:en"),
+            gn("一人公司 OR 个体户 政策 OR 副业 赚钱 when:7d", "zh-CN", "CN", "CN:zh"),
+        ],
+    },
+    {
+        "section": "三、AI",
+        "n": 8,
+        "feeds": [
+            # AI 应用
+            gn("AI应用 OR AI代理 OR AI工具 OR 大模型应用 when:2d", "zh-CN", "CN", "CN:zh"),
+            gn("AI application OR AI agent OR new AI tool when:2d", "en-US", "US", "US:en"),
+            # AI 动向 / 模型发布
+            gn("大模型 OR 人工智能 融资 OR 开源大模型 when:2d", "zh-CN", "CN", "CN:zh"),
+            gn("OpenAI OR Anthropic OR Google AI OR LLM release when:2d", "en-US", "US", "US:en"),
+        ],
+    },
+    {
+        "section": "四、科技新闻",
         "n": 8,
         "feeds": [
             gn("科技 OR 半导体 OR 芯片 OR 智能手机 OR 科技创新 when:2d", "zh-CN", "CN", "CN:zh"),
@@ -50,31 +89,16 @@ TOPICS = [
             "https://www.theverge.com/rss/index.xml",
         ],
     },
-    {
-        "section": "二、Vibe Coding",
-        "n": 8,
-        "feeds": [
-            gn("vibe coding OR AI coding OR Cursor IDE OR agentic coding when:2d", "en-US", "US", "US:en"),
-            gn("Vibe Coding OR AI编程 OR Cursor OR 智能编程 when:2d", "zh-CN", "CN", "CN:zh"),
-        ],
-    },
-    {
-        "section": "三、AI 应用与动向",
-        "n": 10,
-        "feeds": [
-            # 原 "AI 应用"
-            gn("AI应用 OR AI代理 OR AI工具 OR 大模型应用 when:2d", "zh-CN", "CN", "CN:zh"),
-            gn("AI application OR AI agent OR new AI tool when:2d", "en-US", "US", "US:en"),
-            # 原 "AI 动向"
-            gn("大模型 OR 人工智能 融资 OR 开源大模型 when:2d", "zh-CN", "CN", "CN:zh"),
-            gn("OpenAI OR Anthropic OR Google AI OR LLM release when:2d", "en-US", "US", "US:en"),
-        ],
-    },
 ]
 
 HOURS_BACK = int(os.getenv("HOURS_BACK", "48"))
-HISTORY_DAYS = int(os.getenv("HISTORY_DAYS", "3"))
+HISTORY_DAYS = int(os.getenv("HISTORY_DAYS", "7"))
 HISTORY_FILE = os.getenv("HISTORY_FILE", "history.json")
+
+ENABLE_TTS = os.getenv("ENABLE_TTS", "true").lower() in ("1", "true", "yes", "y")
+VOICE = os.getenv("TTS_VOICE", "zh-CN-XiaoxiaoNeural")  # 微软中文女声, 自然流畅
+AUDIO_DIR = os.getenv("AUDIO_DIR", "audio")
+PAGES_BASE = os.getenv("PAGES_BASE", "").strip()  # 留空则由 GITHUB_REPOSITORY 推导
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
 SERVERCHAN_SENDKEY = os.getenv("SERVERCHAN_SENDKEY", "").strip()
@@ -130,6 +154,35 @@ def save_history(keys_new):
         log(f"  历史记录写入失败(不影响推送): {ex}")
 
 
+def prune_audio():
+    """清理超过 HISTORY_DAYS 天的旧音频文件, 避免仓库膨胀。"""
+    try:
+        if not os.path.isdir(AUDIO_DIR):
+            return
+        now = time.time()
+        for fn in os.listdir(AUDIO_DIR):
+            if not fn.endswith(".mp3"):
+                continue
+            fp = os.path.join(AUDIO_DIR, fn)
+            if now - os.path.getmtime(fp) > HISTORY_DAYS * 86400:
+                try:
+                    os.remove(fp)
+                    log(f"  已清理旧音频: {fn}")
+                except Exception:
+                    pass
+    except Exception as ex:
+        log(f"  音频清理失败(忽略): {ex}")
+
+
+def md_to_plain(md: str) -> str:
+    """把 Markdown 转成适合朗读的纯文本: 去掉链接/加粗等标记。"""
+    md = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", md)   # [文字](链接) -> 文字
+    md = re.sub(r"[*_~`#]+", "", md)                     # 去掉强调/标题符号
+    md = re.sub(r"\n{2,}", "\n", md)
+    md = re.sub(r"[ \t]+", " ", md)
+    return md.strip()
+
+
 def entry_time(entry) -> dt.datetime:
     """尽量解析出条目发布时间, 失败则返回当前时间 (确保不被时间过滤误删)。"""
     for key in ("published", "updated"):
@@ -152,14 +205,15 @@ def entry_time(entry) -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
 
 
-def fetch_topic(feeds):
+def fetch_topic(topic):
     """抓取某板块的全部 RSS, 按时间过滤 + 源内去重, 返回(按时间倒序的)新闻列表。"""
+    hours_back = topic.get("hours_back", HOURS_BACK)
     now = dt.datetime.now(dt.timezone.utc)
-    cutoff = now - dt.timedelta(hours=HOURS_BACK)
+    cutoff = now - dt.timedelta(hours=hours_back)
     seen_titles = set()
     items = []
 
-    for url in feeds:
+    for url in topic["feeds"]:
         try:
             log(f"  抓取: {url[:68]}...")
             resp = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=20)
@@ -234,6 +288,31 @@ def build_fallback(section: str, items):
     return "\n".join(lines)
 
 
+def generate_audio(text: str, path: str) -> None:
+    """用 edge-tts 把文本合成语音并保存为 mp3。"""
+    import edge_tts
+
+    async def _run():
+        communicate = edge_tts.Communicate(text, VOICE)
+        await communicate.save(path)
+
+    asyncio.run(_run())
+
+
+def resolve_audio_url(today: str) -> str:
+    """根据 PAGES_BASE 或 GITHUB_REPOSITORY 推导音频公开链接。"""
+    base = PAGES_BASE
+    if not base:
+        repo = os.getenv("GITHUB_REPOSITORY", "").strip()
+        if repo and "/" in repo:
+            owner, name = repo.split("/", 1)
+            base = f"https://{owner}.github.io/{name}"
+    if not base:
+        return ""
+    base = base.rstrip("/")
+    return f"{base}/{AUDIO_DIR}/{today}.mp3"
+
+
 def push_serverchan(title: str, desp: str) -> None:
     """通过 Server酱 Turbo 推送到微信。"""
     if not SERVERCHAN_SENDKEY:
@@ -255,12 +334,13 @@ def main():
     global_seen = set()
     dispatched = []
     sections = []
+    tts_parts = [f"每日科技，{today}。以下是今日要闻语音播报。"]
     any_content = False
 
     for topic in TOPICS:
         n = topic["n"]
         log(f"板块: {topic['section']} (目标 {n} 条)")
-        raw = fetch_topic(topic["feeds"])
+        raw = fetch_topic(topic)
 
         picked = []
         for it in raw:
@@ -288,6 +368,11 @@ def main():
 
         sections.append(f"## {topic['section']}\n\n{content}")
 
+        # 组装语音文本
+        sec_spoken = re.sub(r"^[一二三四五六七八九十]+、", "", topic["section"])
+        tts_parts.append(f"接下来是{sec_spoken}板块。")
+        tts_parts.append(md_to_plain(content))
+
     # 无论推送是否成功, 都记录已处理的新闻, 避免跨天重复
     save_history(dispatched)
 
@@ -297,10 +382,33 @@ def main():
         return
 
     body = "\n\n".join(sections)
+
+    # 语音播报 (优雅降级: 任何失败都不影响文字推送)
+    audio_url = ""
+    if ENABLE_TTS:
+        try:
+            os.makedirs(AUDIO_DIR, exist_ok=True)
+            audio_path = os.path.join(AUDIO_DIR, f"{today}.mp3")
+            tts_text = "\n".join(tts_parts) + "\n播报完毕，祝你今天愉快。"
+            log("  合成语音中 (edge-tts)...")
+            generate_audio(tts_text, audio_path)
+            audio_url = resolve_audio_url(today)
+            if audio_url:
+                log(f"  语音已生成: {audio_url}")
+            else:
+                log("  未能推导音频链接 (未配置 PAGES_BASE/GITHUB_REPOSITORY), 跳过语音链接。")
+        except Exception as ex:
+            log(f"  语音合成失败, 跳过 (不影响文字推送): {ex}")
+        prune_audio()
+
     footer = (
         f"\n\n---\n_自动生成于 {now_bj.strftime('%Y-%m-%d %H:%M')}（北京时间）· 每日科技_"
     )
-    push_serverchan(f"每日科技 {today}", body + footer)
+    if audio_url:
+        audio_line = f"\n\n🎧 **语音播报（点此收听）**：[{today} 语音版]({audio_url})\n"
+        push_serverchan(f"每日科技 {today}", body + audio_line + footer)
+    else:
+        push_serverchan(f"每日科技 {today}", body + footer)
     log("全部完成 ✅")
 
 
