@@ -42,6 +42,19 @@ jobs:
           ENABLE_TTS: 'false'
         run: python push_news.py
 
+      - name: Failure alert
+        if: failure()
+        env:
+          SERVERCHAN_SENDKEY: ${{ secrets.SERVERCHAN_SENDKEY }}
+        run: |
+          NOW_BJ=$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M')
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          curl -s -o /dev/null -w "%{http_code}" \
+            "https://sctapi.ftqq.com/${SERVERCHAN_SENDKEY}.send" \
+            --data-urlencode "title=⚠️ 每日科技推送失败 ${NOW_BJ}" \
+            --data-urlencode "desp=运行记录: [查看日志](${RUN_URL})\n\n时间: ${NOW_BJ}（北京时间）\n请检查 Actions 日志定位原因。" \
+            || true
+
       - name: Commit sent history
         if: always()
         env:
