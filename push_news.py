@@ -402,7 +402,8 @@ def main():
         prune_audio()
 
     footer = (
-        f"\n\n---\n_自动生成于 {now_bj.strftime('%Y-%m-%d %H:%M')}（北京时间）· 每日科技_"
+        f"\n\n---\n_自动生成于 {now_bj.strftime('%Y-%m-%d %H:%M')}（北京时间）· 每日科技_\n\n"
+        f"> 💡 若本文右上角菜单或底部有「🎧 听全文」，点一下即可用微信语音朗读全文（微信原生功能，免费）。"
     )
     if audio_url:
         audio_line = f"🎧 **语音播报（点此收听）**：[{today} 语音版]({audio_url})\n\n"
