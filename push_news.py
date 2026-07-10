@@ -405,8 +405,8 @@ def main():
         f"\n\n---\n_自动生成于 {now_bj.strftime('%Y-%m-%d %H:%M')}（北京时间）· 每日科技_"
     )
     if audio_url:
-        audio_line = f"\n\n🎧 **语音播报（点此收听）**：[{today} 语音版]({audio_url})\n"
-        push_serverchan(f"每日科技 {today}", body + audio_line + footer)
+        audio_line = f"🎧 **语音播报（点此收听）**：[{today} 语音版]({audio_url})\n\n"
+        push_serverchan(f"每日科技 {today}", audio_line + body + footer)
     else:
         push_serverchan(f"每日科技 {today}", body + footer)
     log("全部完成 ✅")
