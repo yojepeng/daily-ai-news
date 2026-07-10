@@ -91,11 +91,12 @@ daily-ai-news/
 
 **开启步骤（仓库已设为公开后）：**
 
-1. 仓库页面 → `Settings` → 左侧 `Pages`
-2. `Build and deployment` → `Source` 选 **`Deploy from a branch`**
-3. `Branch` 选 **`main`**，文件夹选 **`/ (root)`**，点 `Save`
-4. 等待约 1 分钟，Pages 地址形如 `https://你的用户名.github.io/daily-ai-news/`
-5. 之后每次推送里出现的 `audio/2026-xx-xx.mp3` 链接即可直接打开收听
+> 本项目采用 **GitHub Actions 自动部署**方式发布语音（比"从分支部署"更稳、无时序问题）。因此在 Pages 设置里**无需、也无法**手动选 `Deploy from a branch`——那个选项灰度不可点是正常现象，保持默认的 `GitHub Actions` 即可，部署由工作流自动完成。
+
+1. 仓库页面 → `Settings` → 左侧 `Pages`，确认 `Source` 为 **`GitHub Actions`**（默认即是，不要改）
+2. 直接去 `操作(Actions)` → `Daily Tech News` → `运行工作流` 跑一次
+3. 工作流成功后会**自动部署** Pages，地址形如 `https://你的用户名.github.io/daily-ai-news/`
+4. 之后每次推送里出现的 `audio/2026-xx-xx.mp3` 链接即可直接打开收听（首次运行因站点刚建，当天链接可能稍慢，次日稳定）
 
 > 说明：
 > - 脚本会自动用 `GITHUB_REPOSITORY` 推导出 Pages 链接，无需你手动配置。
