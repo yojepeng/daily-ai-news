@@ -2,8 +2,9 @@ name: Daily Tech News
 
 on:
   schedule:
-    # GitHub 使用 UTC 时间。北京时间 06:30 = UTC 22:30 (前一天)
-    - cron: '30 22 * * *'
+    # GitHub 使用 UTC 时间。GitHub 免费账号调度延迟约 60~70 分钟,
+    # 故提前触发以补偿: 目标北京时间 06:30 ≈ 触发时间 UTC 21:25 (= 北京 05:25)
+    - cron: '25 21 * * *'
   workflow_dispatch:   # 允许在 Actions 页面手动触发, 方便测试
 
 # contents: 写回 history.json / 音频文件到仓库（Pages 从分支自动发布）
