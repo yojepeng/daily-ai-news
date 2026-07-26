@@ -275,10 +275,12 @@ def summarize_topic(section: str, n: int, items):
     log(f"  调用 DeepSeek 生成「{section}」...")
     resp = requests.post(DEEPSEEK_URL, json=payload, headers=headers, timeout=120)
     if resp.status_code != 200:
-        # 诊断: 打印完整响应体与请求 prompt 片段, 用于定位 400/4xx 根因
+        # 诊断: 打印完整响应体、请求 prompt 片段, 以及实际发送的新闻条目, 用于定位 400/4xx 根因
         log(f"  ⚠️ DeepSeek 返回 HTTP {resp.status_code}")
         log(f"  ⚠️ 响应体: {resp.text[:1500]}")
         log(f"  ⚠️ 发送 prompt 长度={len(prompt)} 字符, 前 300 字: {prompt[:300]!r}")
+        for i, it in enumerate(items, 1):
+            log(f"  ⚠️   条目{i}: 来源={it.get('source')!r} 标题={it.get('title')!r} 链接长度={len(it.get('link', ''))}")
         resp.raise_for_status()
     content = resp.json()["choices"][0]["message"]["content"].strip()
     log(f"  「{section}」生成完成")
