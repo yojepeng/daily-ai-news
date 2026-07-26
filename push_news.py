@@ -246,19 +246,18 @@ def summarize_topic(section: str, n: int, items):
         return f"_{section}：今日暂无足够的新内容。_"
 
     news_text = "\n".join(
-        f"{i+1}. 【{it['source']}】{it['title']}\n   链接: {it['link']}"
+        f"{i+1}. 【{it['source']}】{it['title']}"
         for i, it in enumerate(items)
     )
 
     prompt = (
-        f"你是一名资深科技媒体编辑。下面是关于「{section}」的今日新闻标题与链接，"
+        f"你是一名资深科技媒体编辑。下面是关于「{section}」的今日新闻标题，"
         "请整理成一份详细、有信息量的中文报道。要求：\n"
         "1. 用 Markdown 格式，每条独立成段并加粗标题；\n"
         "2. 每条用 2-4 句话具体说明：发生了什么、涉及哪些公司/人物/数据/产品、为什么重要；不要只复述标题；\n"
-        "3. 保留原文链接，用 [原文](URL) 形式附在每条末尾；\n"
-        f"4. 最多 {n} 条，不足则按实际条数；按重要性排序；相似内容合并为一条；\n"
-        "5. 剔除纯营销软文、无实质信息的水稿；\n"
-        "6. 开头用一两句话概述该领域今日走势。\n\n"
+        f"3. 最多 {n} 条，不足则按实际条数；按重要性排序；相似内容合并为一条；\n"
+        "4. 剔除纯营销软文、无实质信息的水稿；\n"
+        "5. 开头用一两句话概述该领域今日走势。\n\n"
         f"新闻列表：\n{news_text}"
     )
 
@@ -274,14 +273,7 @@ def summarize_topic(section: str, n: int, items):
 
     log(f"  调用 DeepSeek 生成「{section}」...")
     resp = requests.post(DEEPSEEK_URL, json=payload, headers=headers, timeout=120)
-    if resp.status_code != 200:
-        # 诊断: 打印完整响应体、请求 prompt 片段, 以及实际发送的新闻条目, 用于定位 400/4xx 根因
-        log(f"  ⚠️ DeepSeek 返回 HTTP {resp.status_code}")
-        log(f"  ⚠️ 响应体: {resp.text[:1500]}")
-        log(f"  ⚠️ 发送 prompt 长度={len(prompt)} 字符, 前 300 字: {prompt[:300]!r}")
-        for i, it in enumerate(items, 1):
-            log(f"  ⚠️   条目{i}: 来源={it.get('source')!r} 标题={it.get('title')!r} 链接长度={len(it.get('link', ''))}")
-        resp.raise_for_status()
+    resp.raise_for_status()
     content = resp.json()["choices"][0]["message"]["content"].strip()
     log(f"  「{section}」生成完成")
     return content
@@ -291,7 +283,7 @@ def build_fallback(section: str, items):
     """DeepSeek 不可用时, 直接拼接原始新闻列表。"""
     lines = [f"**{section}**（未经 AI 总结，原始列表）\n"]
     for i, it in enumerate(items, 1):
-        lines.append(f"{i}. **{it['title']}**  \n   来源：{it['source']} · [原文]({it['link']})")
+        lines.append(f"{i}. **{it['title']}**  \n   来源：{it['source']}")
     return "\n".join(lines)
 
 
