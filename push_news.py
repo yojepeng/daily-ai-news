@@ -126,6 +126,21 @@ def normalize_key(s: str) -> str:
     return s[:40]
 
 
+def prettify_source(url: str, raw_source: str) -> str:
+    """把 RSS feed title 转成读者友好的来源名。"""
+    if "news.google.com" in url:
+        return "Google 新闻"
+    if raw_source and len(raw_source) < 60 and not raw_source.startswith('"'):
+        return raw_source.strip()
+    try:
+        host = urllib.parse.urlparse(url).netloc.lower()
+        if host.startswith("www."):
+            host = host[4:]
+        return host or "未知来源"
+    except Exception:
+        return "未知来源"
+
+
 def load_history():
     """读取历史记录(已推送标题), 并裁剪掉超过 HISTORY_DAYS 天的旧条目。返回 (key集合, 完整列表)。"""
     try:
@@ -218,7 +233,7 @@ def fetch_topic(topic):
             log(f"  抓取: {url[:68]}...")
             resp = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=20)
             feed = feedparser.parse(resp.content)
-            source = feed.feed.get("title", "未知来源")
+            source = prettify_source(url, feed.feed.get("title", ""))
             for e in feed.entries:
                 title = html.unescape((e.get("title") or "").strip())
                 link = (e.get("link") or "").strip()
@@ -273,7 +288,18 @@ def summarize_topic(section: str, n: int, items):
 
     log(f"  调用 DeepSeek 生成「{section}」...")
     resp = requests.post(DEEPSEEK_URL, json=payload, headers=headers, timeout=120)
-    resp.raise_for_status()
+    if not resp.ok:
+        err_text = resp.text[:500]
+        log(f"  DeepSeek 返回错误 [{resp.status_code}]: {err_text}")
+        if resp.status_code == 401:
+            raise RuntimeError("DeepSeek API Key 无效或已被吊销")
+        if resp.status_code == 402:
+            raise RuntimeError("DeepSeek 账户余额不足")
+        if resp.status_code == 429:
+            raise RuntimeError("DeepSeek 请求过于频繁，请稍后重试")
+        if resp.status_code == 400:
+            raise RuntimeError(f"DeepSeek 请求格式/内容异常(400): {err_text}")
+        raise RuntimeError(f"DeepSeek 服务错误({resp.status_code}): {err_text}")
     content = resp.json()["choices"][0]["message"]["content"].strip()
     log(f"  「{section}」生成完成")
     return content
@@ -281,7 +307,9 @@ def summarize_topic(section: str, n: int, items):
 
 def build_fallback(section: str, items):
     """DeepSeek 不可用时, 直接拼接原始新闻列表。"""
-    lines = [f"**{section}**（未经 AI 总结，原始列表）\n"]
+    if not items:
+        return f"_{section}：今日暂无足够的新内容。_"
+    lines = ["_（未经 AI 总结，原始列表）_\n"]
     for i, it in enumerate(items, 1):
         lines.append(f"{i}. **{it['title']}**  \n   来源：{it['source']}")
     return "\n".join(lines)
@@ -333,6 +361,7 @@ def main():
     global_seen = set()
     dispatched = []
     sections = []
+    fallback_reasons = []
     tts_parts = [f"每日科技，{today}。以下是今日要闻语音播报。"]
     any_content = False
 
@@ -360,10 +389,12 @@ def main():
                 content = summarize_topic(topic["section"], n, picked)
             except Exception as ex:
                 log(f"  DeepSeek 调用失败, 使用原始列表兜底: {ex}")
-                content = build_fallback(topic["section"], picked) if picked else f"_{topic['section']}：今日暂无足够的新内容。_"
+                fallback_reasons.append(f"{topic['section']}: {ex}")
+                content = build_fallback(topic["section"], picked) if picked else "_今日暂无足够的新内容。_"
         else:
             log("  未配置 DEEPSEEK_API_KEY, 使用原始列表。")
-            content = build_fallback(topic["section"], picked) if picked else f"_{topic['section']}：今日暂无足够的新内容。_"
+            fallback_reasons.append(f"{topic['section']}: 未配置 DEEPSEEK_API_KEY")
+            content = build_fallback(topic["section"], picked) if picked else "_今日暂无足够的新内容。_"
 
         sections.append(f"## {topic['section']}\n\n{content}")
 
@@ -400,15 +431,25 @@ def main():
             log(f"  语音合成失败, 跳过 (不影响文字推送): {ex}")
         prune_audio()
 
+    title_prefix = ""
+    alert_block = ""
+    if fallback_reasons:
+        title_prefix = "⚠️ AI总结失败 "
+        alert_block = (
+            "> ⚠️ 本次推送中部分板块未经过 AI 总结，显示的是原始新闻列表。\n"
+            + "\n".join(f"> - {r}" for r in fallback_reasons)
+            + "\n> 请检查 GitHub Actions 日志，并确认 `DEEPSEEK_API_KEY` 有效且账户有余额。\n\n"
+        )
+
     footer = (
         f"\n\n---\n_自动生成于 {now_bj.strftime('%Y-%m-%d %H:%M')}（北京时间）· 每日科技_\n\n"
         f"> 💡 若本文右上角菜单或底部有「🎧 听全文」，点一下即可用微信语音朗读全文（微信原生功能，免费）。"
     )
     if audio_url:
         audio_line = f"🎧 **语音播报（点此收听）**：[{today} 语音版]({audio_url})\n\n"
-        push_serverchan(f"每日科技 {today}", audio_line + body + footer)
+        push_serverchan(f"{title_prefix}每日科技 {today}", audio_line + alert_block + body + footer)
     else:
-        push_serverchan(f"每日科技 {today}", body + footer)
+        push_serverchan(f"{title_prefix}每日科技 {today}", alert_block + body + footer)
     log("全部完成 ✅")
 
 
