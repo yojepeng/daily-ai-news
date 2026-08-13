@@ -5,11 +5,11 @@
 流程: 分板块抓取 RSS -> 各板块用 DeepSeek 总结成详细报道 -> Server酱 推送到微信
       (可选) 用 edge-tts 把新闻合成语音, 经 GitHub Pages 生成公开链接一并推送
 
-板块 (共 4 个, 共 28 条):
-  一、Vibe Coding      (6 条)
-  二、OPC 一人公司     (6 条, 政策/热点/新闻, 时间窗放宽到 7 天)
-  三、AI               (8 条, 应用+动向+模型发布)
-  四、科技新闻         (8 条)
+板块 (共 4 个, 共 18 条, 每条极简一句话新闻):
+  一、Vibe Coding      (4 条)
+  二、OPC 一人公司     (4 条, 政策/热点/新闻, 时间窗放宽到 7 天)
+  三、AI               (5 条, 应用+动向+模型发布)
+  四、科技新闻         (5 条)
 
 去重策略:
   - 板块间 / 数据源间: 全局标题归一化去重, 同一新闻不会出现在两个板块。
@@ -51,7 +51,7 @@ def gn(query: str, hl: str, gl: str, ceid: str) -> str:
 TOPICS = [
     {
         "section": "一、Vibe Coding",
-        "n": 6,
+        "n": 4,
         "feeds": [
             gn("vibe coding OR AI coding OR Cursor IDE OR agentic coding when:2d", "en-US", "US", "US:en"),
             gn("Vibe Coding OR AI编程 OR Cursor OR 智能编程 when:2d", "zh-CN", "CN", "CN:zh"),
@@ -59,7 +59,7 @@ TOPICS = [
     },
     {
         "section": "二、OPC 一人公司",
-        "n": 6,
+        "n": 4,
         "hours_back": 168,  # 一人公司类资讯频率低, 放宽到 7 天
         "feeds": [
             gn("一人公司 OR 独立开发者 OR 个体创业 OR 数字游民 OR solopreneur when:7d", "zh-CN", "CN", "CN:zh"),
@@ -69,7 +69,7 @@ TOPICS = [
     },
     {
         "section": "三、AI",
-        "n": 8,
+        "n": 5,
         "feeds": [
             # AI 应用
             gn("AI应用 OR AI代理 OR AI工具 OR 大模型应用 when:2d", "zh-CN", "CN", "CN:zh"),
@@ -81,7 +81,7 @@ TOPICS = [
     },
     {
         "section": "四、科技新闻",
-        "n": 8,
+        "n": 5,
         "feeds": [
             gn("科技 OR 半导体 OR 芯片 OR 智能手机 OR 科技创新 when:2d", "zh-CN", "CN", "CN:zh"),
             gn("technology OR semiconductor OR smartphone OR chip when:2d", "en-US", "US", "US:en"),
@@ -256,24 +256,26 @@ def fetch_topic(topic):
 
 
 def summarize_topic(section: str, n: int, items):
-    """调用 DeepSeek 把某板块新闻整理成详细的 Markdown 报道。"""
+    """调用 DeepSeek 把某板块新闻整理成极简的一句话新闻。"""
     if not items:
         return f"_{section}：今日暂无足够的新内容。_"
 
     news_text = "\n".join(
-        f"{i+1}. 【{it['source']}】{it['title']}"
+        f"{i+1}. {it['title']}"
         for i, it in enumerate(items)
     )
 
     prompt = (
-        f"你是一名资深科技媒体编辑。下面是关于「{section}」的今日新闻标题，"
-        "请整理成一份详细、有信息量的中文报道。要求：\n"
-        "1. 用 Markdown 格式，每条独立成段并加粗标题；\n"
-        "2. 每条用 2-4 句话具体说明：发生了什么、涉及哪些公司/人物/数据/产品、为什么重要；不要只复述标题；\n"
-        f"3. 最多 {n} 条，不足则按实际条数；按重要性排序；相似内容合并为一条；\n"
-        "4. 剔除纯营销软文、无实质信息的水稿；\n"
-        "5. 开头用一两句话概述该领域今日走势。\n\n"
-        f"新闻列表：\n{news_text}"
+        f"你是科技资讯编辑。针对「{section}」的今日新闻标题，产出极简「一句话新闻」列表。\n"
+        "规则：\n"
+        "1. 每条仅一句客观陈述（≤35字），说清核心事实：谁/什么 + 做了什么 + 关键影响，不评论、不铺垫、不复述标题空话。\n"
+        f"2. 最多 {n} 条，不足按实际；按重要性排序；相近内容合并为一条。\n"
+        "3. 剔除纯营销软文、无实质信息的水稿。\n"
+        "4. 不要开头概述、不要结尾总结；输出每条一行，用「1. 」「2. 」编号，不要加粗/emoji/多余符号。\n\n"
+        "输出示例：\n"
+        "1. OpenAI 发布 GPT-5，推理与多模态能力大幅提升。\n"
+        "2. 谷歌拟以 230 亿美元收购云安全公司 Wiz。\n\n"
+        f"新闻标题：\n{news_text}"
     )
 
     payload = {
